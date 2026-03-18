@@ -200,7 +200,12 @@ function PageGroup({
 
   function handleGroupCheckbox() {
     const paths = group.map((p) => p.path)
-    onSetGroupSelected(paths, !allSelected)
+    const selectAll = !allSelected
+    onSetGroupSelected(paths, selectAll)
+    // When selecting all, more than 1 child is selected — disable deduplicate
+    if (selectAll && children.length > 1) {
+      onSetDeduplicate(false)
+    }
   }
 
   function handleDeduplicate() {
