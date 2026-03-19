@@ -4,7 +4,6 @@ import { useState } from "react"
 import { type DiscoveredPage, groupPagesByParent } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -43,22 +42,6 @@ export default function PageList({
 
   const groups = groupPagesByParent(pages)
 
-  // Count how many pages will actually be captured
-  let effectiveCount = 0
-  for (const [parent, group] of groups) {
-    const isGrouped = parent !== "/" && group.length >= 2
-    const isDeduplicated = isGrouped && deduplicatedGroups.has(parent)
-
-    if (isDeduplicated) {
-      const indexPage = group.find((p) => p.path === parent)
-      const children = group.filter((p) => p.path !== parent)
-      if (indexPage?.selected) effectiveCount++
-      if (children[0]?.selected) effectiveCount++
-    } else {
-      effectiveCount += group.filter((p) => p.selected).length
-    }
-  }
-
   function handleAdd(e: React.FormEvent) {
     e.preventDefault()
     let path = customPath.trim()
@@ -71,7 +54,12 @@ export default function PageList({
   // Build render list
   const renderItems: Array<
     | { type: "page"; page: DiscoveredPage }
-    | { type: "group"; parent: string; group: DiscoveredPage[]; deduplicated: boolean }
+    | {
+        type: "group"
+        parent: string
+        group: DiscoveredPage[]
+        deduplicated: boolean
+      }
   > = []
 
   for (const [parent, group] of groups) {
@@ -91,67 +79,50 @@ export default function PageList({
   }
 
   return (
-    <div className="w-full max-w-2xl space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Discovered Pages</h2>
-          <p className="text-sm text-muted-foreground">
-            {effectiveCount} page{effectiveCount !== 1 && "s"} will be captured
-          </p>
-        </div>
-        <Badge variant="secondary" className="font-mono text-xs">
-          {new URL(baseUrl).hostname}
-        </Badge>
-      </div>
-
-      <div className="rounded-lg border bg-card">
-        <div className="max-h-80 overflow-y-auto">
-          {renderItems.map((item) => {
-            if (item.type === "group") {
-              return (
-                <PageGroup
-                  key={`group-${item.parent}`}
-                  parent={item.parent}
-                  group={item.group}
-                  deduplicated={item.deduplicated}
-                  onToggleDeduplicate={() => onToggleDeduplicate(item.parent)}
-                  onSetDeduplicate={(value) => onSetDeduplicate(item.parent, value)}
-                  onTogglePage={onToggle}
-                  onRemovePage={onRemove}
-                  onSetGroupSelected={onSetGroupSelected}
-                />
-              )
-            }
-
+    <>
+      <div className="max-h-80 overflow-y-auto">
+        {renderItems.map((item) => {
+          if (item.type === "group") {
             return (
-              <PageRow
-                key={item.page.path}
-                page={item.page}
-                indent={false}
-                dimmed={!item.page.selected}
-                onToggle={() => onToggle(item.page.path)}
-                onRemove={() => onRemove(item.page.path)}
+              <PageGroup
+                key={`group-${item.parent}`}
+                parent={item.parent}
+                group={item.group}
+                deduplicated={item.deduplicated}
+                onToggleDeduplicate={() => onToggleDeduplicate(item.parent)}
+                onSetDeduplicate={(value) =>
+                  onSetDeduplicate(item.parent, value)
+                }
+                onTogglePage={onToggle}
+                onRemovePage={onRemove}
+                onSetGroupSelected={onSetGroupSelected}
               />
             )
-          })}
-        </div>
+          }
+
+          return (
+            <PageRow
+              key={item.page.path}
+              page={item.page}
+              indent={false}
+              dimmed={!item.page.selected}
+              onToggle={() => onToggle(item.page.path)}
+              onRemove={() => onRemove(item.page.path)}
+            />
+          )
+        })}
       </div>
 
-      <form onSubmit={handleAdd} className="flex gap-2">
-        <div className="relative flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-muted-foreground">
-            {new URL(baseUrl).origin}
+      <form onSubmit={handleAdd} className="flex items-center gap-2 border-t px-4 py-3">
+        <div className="flex flex-1 items-center overflow-hidden rounded-md border border-input">
+          <span className="shrink-0 border-r bg-muted/50 px-2 py-1 font-mono text-xs font-medium text-foreground">
+            {new URL(baseUrl).hostname}
           </span>
-          <Input
+          <input
             value={customPath}
             onChange={(e) => setCustomPath(e.target.value)}
             placeholder="/custom-path"
-            className="pl-[var(--prefix-width)] font-mono text-sm"
-            style={
-              {
-                "--prefix-width": `${new URL(baseUrl).origin.length * 0.55 + 1.5}rem`,
-              } as React.CSSProperties
-            }
+            className="h-7 min-w-0 flex-1 bg-transparent px-2 font-mono text-xs outline-none placeholder:text-muted-foreground"
           />
         </div>
         <Button
@@ -160,11 +131,11 @@ export default function PageList({
           size="default"
           disabled={!customPath.trim()}
         >
-          <IconPlus className="size-4" />
-          Add Page
+          <IconPlus className="size-3.5" />
+          Add
         </Button>
       </form>
-    </div>
+    </>
   )
 }
 
@@ -193,7 +164,6 @@ function PageGroup({
   const allSelected = selectedInGroup === group.length
   const noneSelected = selectedInGroup === 0
 
-  // When deduplicated: count index (if selected) + representative (if selected)
   const willCapture = deduplicated
     ? (indexPage?.selected ? 1 : 0) + (children[0]?.selected ? 1 : 0)
     : selectedInGroup
@@ -202,7 +172,6 @@ function PageGroup({
     const paths = group.map((p) => p.path)
     const selectAll = !allSelected
     onSetGroupSelected(paths, selectAll)
-    // When selecting all, more than 1 child is selected — disable deduplicate
     if (selectAll && children.length > 1) {
       onSetDeduplicate(false)
     }
@@ -210,7 +179,6 @@ function PageGroup({
 
   function handleDeduplicate() {
     if (!deduplicated) {
-      // Turning on: deselect all children except the first
       const toDeselect = children.slice(1).map((p) => p.path)
       if (toDeselect.length > 0) {
         onSetGroupSelected(toDeselect, false)
@@ -266,7 +234,7 @@ function PageGroup({
         </div>
       </div>
 
-      {/* Index page — always independent */}
+      {/* Index page */}
       {indexPage && (
         <PageRow
           page={indexPage}
@@ -278,7 +246,7 @@ function PageGroup({
       )}
 
       {/* Children */}
-      {children.map((page, i) => (
+      {children.map((page) => (
         <PageRow
           key={page.path}
           page={page}
@@ -286,12 +254,9 @@ function PageGroup({
           dimmed={!page.selected}
           onToggle={() => {
             onTogglePage(page.path)
-            // After toggling, figure out how many children will be selected
             const selectedAfter = children.filter((c) =>
               c.path === page.path ? !page.selected : c.selected,
             ).length
-            // Auto-enable "same route" when exactly 1 child selected,
-            // auto-disable when more than 1
             if (selectedAfter <= 1) {
               onSetDeduplicate(true)
             } else {
@@ -330,7 +295,7 @@ function PageRow({
   return (
     <div
       className={cn(
-        "group flex items-center gap-3 border-b px-4 py-2.5 last:border-b-0",
+        "group flex items-center gap-3 border-b px-4 py-2.5 transition-opacity last:border-b-0",
         indent && "pl-8",
         dimmed && "opacity-50",
       )}

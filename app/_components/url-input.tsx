@@ -42,19 +42,19 @@ export default function UrlInput({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-2xl space-y-3">
-      <div className="flex gap-3">
+    <form onSubmit={handleSubmit} className="w-full space-y-3">
+      <div className="flex gap-2">
         <div className="relative flex-1">
-          <IconWorldSearch className="absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
+          <IconWorldSearch className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="text"
-            placeholder="Paste a URL to audit... e.g. https://example.com"
+            placeholder="Enter a URL to audit... e.g. https://example.com"
             value={value}
             onChange={(e) => {
               setValue(e.target.value)
               setError("")
             }}
-            className="h-12 pl-11 text-base"
+            className="h-8 pl-8"
             autoFocus
           />
         </div>
