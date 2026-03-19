@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
 import { IconX } from "@tabler/icons-react"
 import { type Breakpoint, type Screenshot, screenshotKey } from "@/lib/types"
 import {
@@ -33,8 +34,7 @@ const nodeTypes = {
 }
 
 const SCALE = 0.5
-const GAP_X = 100
-const GAP_Y = 120
+const DEFAULT_SPACING = 100
 const LABEL_WIDTH = 200
 
 type CanvasDialogProps = {
@@ -51,6 +51,7 @@ function buildNodes(
   breakpoints: Breakpoint[],
   breakpointOrder: string[],
   screenshots: Map<string, Screenshot>,
+  spacing: number,
 ): Node[] {
   const orderedBreakpoints = breakpointOrder
     .map((id) => breakpoints.find((b) => b.id === id))
@@ -84,7 +85,7 @@ function buildNodes(
         draggable: true,
       })
 
-      x += bp.width * SCALE + GAP_X
+      x += bp.width * SCALE + spacing
     }
 
     y += 800
@@ -96,6 +97,7 @@ function buildNodes(
 function repositionNodes(
   nodes: Node[],
   pages: Array<{ path: string }>,
+  spacing: number,
 ): Node[] {
   const rowMaxHeight = new Map<string, number>()
   for (const node of nodes) {
@@ -109,7 +111,7 @@ function repositionNodes(
   let y = 0
   for (const page of pages) {
     rowY.set(page.path, y)
-    y += (rowMaxHeight.get(page.path) || 500) + GAP_Y
+    y += (rowMaxHeight.get(page.path) || 500) + spacing * 1.2
   }
 
   let changed = false
@@ -141,21 +143,23 @@ function ScreenshotCanvas({
   breakpoints,
   breakpointOrder,
   screenshots,
+  spacing,
   onClose,
 }: Omit<CanvasDialogProps, "open" | "onOpenChange"> & {
+  spacing: number
   onClose: () => void
 }) {
   const [nodes, setNodes] = useState<Node[]>(() =>
-    buildNodes(pages, breakpoints, breakpointOrder, screenshots),
+    buildNodes(pages, breakpoints, breakpointOrder, screenshots, spacing),
   )
   const { fitView } = useReactFlow()
   const didInitialFit = useRef(false)
 
-  // Rebuild nodes when data changes
+  // Rebuild nodes when data or spacing changes
   useEffect(() => {
-    setNodes(buildNodes(pages, breakpoints, breakpointOrder, screenshots))
+    setNodes(buildNodes(pages, breakpoints, breakpointOrder, screenshots, spacing))
     didInitialFit.current = false
-  }, [pages, breakpoints, breakpointOrder, screenshots])
+  }, [pages, breakpoints, breakpointOrder, screenshots, spacing])
 
   // --- Undo / Redo ---
   const historyRef = useRef<{ past: Node[][]; future: Node[][] }>({
@@ -221,7 +225,7 @@ function ScreenshotCanvas({
 
         if (!hasDimensionChange) return updated
 
-        const repositioned = repositionNodes(updated, pages)
+        const repositioned = repositionNodes(updated, pages, spacing)
         if (repositioned !== updated) {
           if (!didInitialFit.current) {
             didInitialFit.current = true
@@ -233,7 +237,7 @@ function ScreenshotCanvas({
         return updated
       })
     },
-    [pages, fitView],
+    [pages, spacing, fitView],
   )
 
   return (
@@ -265,6 +269,8 @@ export default function CanvasDialog({
   breakpointOrder,
   screenshots,
 }: CanvasDialogProps) {
+  const [spacing, setSpacing] = useState(DEFAULT_SPACING)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -281,7 +287,28 @@ export default function CanvasDialog({
             {breakpoints.length} breakpoint{breakpoints.length !== 1 && "s"}
           </Badge>
           <div className="ml-auto flex items-center gap-3">
-            <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+            {/* Spacing slider */}
+            <div className="hidden items-center gap-2 sm:flex">
+              <Label
+                htmlFor="spacing-slider"
+                className="cursor-pointer text-xs text-muted-foreground"
+              >
+                Spacing
+              </Label>
+              <input
+                id="spacing-slider"
+                type="range"
+                min={20}
+                max={300}
+                value={spacing}
+                onChange={(e) => setSpacing(Number(e.target.value))}
+                className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+              />
+              <span className="w-8 font-mono text-[10px] text-muted-foreground">
+                {spacing}
+              </span>
+            </div>
+            <div className="hidden items-center gap-1.5 border-l pl-3 text-xs text-muted-foreground lg:flex">
               <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">
                 ⌘Z
               </kbd>
@@ -314,6 +341,7 @@ export default function CanvasDialog({
               breakpoints={breakpoints}
               breakpointOrder={breakpointOrder}
               screenshots={screenshots}
+              spacing={spacing}
               onClose={() => onOpenChange(false)}
             />
           </ReactFlowProvider>
