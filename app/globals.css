@@ -126,3 +126,9 @@
     @apply font-sans;
     }
 }
+
+@layer utilities {
+  .canvas-view .react-flow__controls-button {
+    @apply border bg-card text-foreground hover:bg-muted;
+  }
+}

@@ -24,7 +24,8 @@ import UrlInput from "./_components/url-input"
 import PageList from "./_components/page-list"
 import BreakpointBar from "./_components/breakpoint-bar"
 import ScreenshotGrid from "./_components/screenshot-grid"
-import { IconCamera, IconLoader2, IconInfoCircle } from "@tabler/icons-react"
+import CanvasDialog from "./_components/screenshot-canvas"
+import { IconCamera, IconLoader2, IconInfoCircle, IconLayout } from "@tabler/icons-react"
 
 export default function Page() {
   const {
@@ -54,6 +55,7 @@ export default function Page() {
   } = useSnapsite()
 
   const [discoveryError, setDiscoveryError] = useState("")
+  const [canvasOpen, setCanvasOpen] = useState(false)
 
   const hasPages = pages.length > 0
   const hasBreakpoints = breakpoints.length > 0
@@ -291,7 +293,18 @@ export default function Page() {
 
             {/* Screenshot Grid */}
             {hasScreenshots && (
-              <section className="animate-in fade-in">
+              <section className="animate-in fade-in space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold">Screenshots</h2>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCanvasOpen(true)}
+                  >
+                    <IconLayout className="size-4" />
+                    Show in Canvas
+                  </Button>
+                </div>
                 <ScreenshotGrid
                   pages={gridPages}
                   breakpoints={breakpoints}
@@ -303,6 +316,14 @@ export default function Page() {
                   }
                   progress={captureProgress}
                   isCapturing={isCapturing}
+                />
+                <CanvasDialog
+                  open={canvasOpen}
+                  onOpenChange={setCanvasOpen}
+                  pages={gridPages}
+                  breakpoints={breakpoints}
+                  breakpointOrder={breakpointOrder}
+                  screenshots={screenshots}
                 />
               </section>
             )}
