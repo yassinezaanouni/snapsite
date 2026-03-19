@@ -57,8 +57,6 @@ function buildNodes(
     .filter(Boolean) as Breakpoint[]
 
   const nodes: Node[] = []
-  // Initial Y positions use a rough estimate — repositionNodes() will fix them
-  // once React Flow measures actual rendered heights
   let y = 0
 
   for (const page of pages) {
@@ -68,6 +66,7 @@ function buildNodes(
       position: { x: 0, y: y + 20 },
       data: { label: page.path, pagePath: page.path },
       connectable: false,
+      draggable: false,
     })
 
     let x = LABEL_WIDTH
@@ -82,12 +81,12 @@ function buildNodes(
         position: { x, y },
         data: { screenshot, breakpoint: bp, scale: SCALE, pagePath: page.path },
         connectable: false,
+        draggable: true,
       })
 
       x += bp.width * SCALE + GAP_X
     }
 
-    // Rough initial spacing — will be corrected after measurement
     y += 800
   }
 
@@ -98,7 +97,6 @@ function repositionNodes(
   nodes: Node[],
   pages: Array<{ path: string }>,
 ): Node[] {
-  // Find max measured height per page row
   const rowMaxHeight = new Map<string, number>()
   for (const node of nodes) {
     if (node.type !== "screenshotFrame") continue
@@ -107,7 +105,6 @@ function repositionNodes(
     rowMaxHeight.set(pagePath, Math.max(rowMaxHeight.get(pagePath) || 0, h))
   }
 
-  // Compute cumulative Y per row
   const rowY = new Map<string, number>()
   let y = 0
   for (const page of pages) {
@@ -115,7 +112,6 @@ function repositionNodes(
     y += (rowMaxHeight.get(page.path) || 500) + GAP_Y
   }
 
-  // Update node positions — only if they actually changed
   let changed = false
   const result = nodes.map((node) => {
     const pagePath = node.data.pagePath as string | undefined
@@ -134,23 +130,87 @@ function repositionNodes(
   return changed ? result : nodes
 }
 
+// --- Undo/Redo helpers ---
+
+function snapshotNodes(nodes: Node[]): Node[] {
+  return nodes.map((n) => ({ ...n, position: { ...n.position } }))
+}
+
 function ScreenshotCanvas({
   pages,
   breakpoints,
   breakpointOrder,
   screenshots,
-}: Omit<CanvasDialogProps, "open" | "onOpenChange">) {
+  onClose,
+}: Omit<CanvasDialogProps, "open" | "onOpenChange"> & {
+  onClose: () => void
+}) {
   const [nodes, setNodes] = useState<Node[]>(() =>
     buildNodes(pages, breakpoints, breakpointOrder, screenshots),
   )
   const { fitView } = useReactFlow()
   const didInitialFit = useRef(false)
 
-  // Rebuild nodes when data changes (new screenshots arrive, etc.)
+  // Rebuild nodes when data changes
   useEffect(() => {
     setNodes(buildNodes(pages, breakpoints, breakpointOrder, screenshots))
     didInitialFit.current = false
   }, [pages, breakpoints, breakpointOrder, screenshots])
+
+  // --- Undo / Redo ---
+  const historyRef = useRef<{ past: Node[][]; future: Node[][] }>({
+    past: [],
+    future: [],
+  })
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
+
+  const saveSnapshot = useCallback(() => {
+    historyRef.current.past.push(snapshotNodes(nodesRef.current))
+    historyRef.current.future = []
+  }, [])
+
+  const undo = useCallback(() => {
+    const { past, future } = historyRef.current
+    if (past.length === 0) return
+    const previous = past.pop()!
+    future.push(snapshotNodes(nodesRef.current))
+    setNodes(previous)
+  }, [])
+
+  const redo = useCallback(() => {
+    const { past, future } = historyRef.current
+    if (future.length === 0) return
+    const next = future.pop()!
+    past.push(snapshotNodes(nodesRef.current))
+    setNodes(next)
+  }, [])
+
+  // --- Keyboard shortcuts ---
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey
+
+      if (mod && e.key === "z" && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      }
+      if (mod && e.key === "z" && e.shiftKey) {
+        e.preventDefault()
+        redo()
+      }
+      if (mod && e.key === "0") {
+        e.preventDefault()
+        fitView({ padding: 0.1 })
+      }
+      if (e.key === "Escape") {
+        onClose()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [undo, redo, fitView, onClose])
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -163,7 +223,6 @@ function ScreenshotCanvas({
 
         const repositioned = repositionNodes(updated, pages)
         if (repositioned !== updated) {
-          // Fit view after first proper layout
           if (!didInitialFit.current) {
             didInitialFit.current = true
             requestAnimationFrame(() => fitView({ padding: 0.1 }))
@@ -182,6 +241,7 @@ function ScreenshotCanvas({
       nodes={nodes}
       edges={[]}
       onNodesChange={onNodesChange}
+      onNodeDragStart={saveSnapshot}
       nodeTypes={nodeTypes}
       fitView
       minZoom={0.05}
@@ -209,7 +269,7 @@ export default function CanvasDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="inset-0 top-0 left-0 flex h-dvh w-dvw max-w-none -translate-x-0 -translate-y-0 flex-col rounded-none p-0 gap-0 sm:max-w-none"
+        className="inset-0 top-0 left-0 flex h-dvh w-dvw max-w-none -translate-x-0 -translate-y-0 flex-col gap-0 rounded-none p-0 sm:max-w-none"
       >
         <DialogTitle className="sr-only">Screenshot Canvas</DialogTitle>
 
@@ -220,15 +280,30 @@ export default function CanvasDialog({
             {pages.length} page{pages.length !== 1 && "s"} &times;{" "}
             {breakpoints.length} breakpoint{breakpoints.length !== 1 && "s"}
           </Badge>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="ml-auto"
-            onClick={() => onOpenChange(false)}
-          >
-            <IconX />
-            <span className="sr-only">Close</span>
-          </Button>
+          <div className="ml-auto flex items-center gap-3">
+            <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+              <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">
+                ⌘Z
+              </kbd>
+              <span>undo</span>
+              <kbd className="ml-1.5 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">
+                ⌘⇧Z
+              </kbd>
+              <span>redo</span>
+              <kbd className="ml-1.5 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">
+                ⌘0
+              </kbd>
+              <span>fit</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => onOpenChange(false)}
+            >
+              <IconX />
+              <span className="sr-only">Close</span>
+            </Button>
+          </div>
         </div>
 
         {/* Canvas */}
@@ -239,6 +314,7 @@ export default function CanvasDialog({
               breakpoints={breakpoints}
               breakpointOrder={breakpointOrder}
               screenshots={screenshots}
+              onClose={() => onOpenChange(false)}
             />
           </ReactFlowProvider>
         </div>
