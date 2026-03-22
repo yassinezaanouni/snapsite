@@ -52,14 +52,19 @@ export const ScreenshotFrameNode = React.memo(function ScreenshotFrameNode({
           </div>
         )}
 
-        {screenshot?.status === "done" && screenshot.imageBase64 && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`data:image/png;base64,${screenshot.imageBase64}`}
-            alt={`${screenshot.pageUrl} at ${breakpoint.width}px`}
-            className="w-full"
-          />
-        )}
+        {screenshot?.status === "done" &&
+          (screenshot.imageBase64 || screenshot.imageUrl) && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={
+                screenshot.imageBase64
+                  ? `data:image/png;base64,${screenshot.imageBase64}`
+                  : screenshot.imageUrl!
+              }
+              alt={`${screenshot.pageUrl} at ${breakpoint.width}px`}
+              className="w-full"
+            />
+          )}
       </div>
     </div>
   )

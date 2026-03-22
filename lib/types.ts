@@ -17,6 +17,7 @@ export type Screenshot = {
   breakpointId: string
   status: ScreenshotStatus
   imageBase64?: string
+  imageUrl?: string
   error?: string
 }
 

@@ -324,6 +324,7 @@ export default function Page() {
                   breakpoints={breakpoints}
                   breakpointOrder={breakpointOrder}
                   screenshots={screenshots}
+                  siteUrl={url}
                 />
               </section>
             )}

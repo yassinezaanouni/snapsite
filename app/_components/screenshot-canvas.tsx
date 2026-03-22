@@ -13,6 +13,9 @@ import {
   type NodeChange,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
+import { useMutation } from "convex/react"
+import { api } from "@/convex/_generated/api"
+import type { Id } from "@/convex/_generated/dataModel"
 import {
   Dialog,
   DialogContent,
@@ -21,7 +24,12 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { IconX } from "@tabler/icons-react"
+import {
+  IconX,
+  IconShare,
+  IconCheck,
+  IconLoader2,
+} from "@tabler/icons-react"
 import { type Breakpoint, type Screenshot, screenshotKey } from "@/lib/types"
 import {
   ScreenshotFrameNode,
@@ -37,17 +45,21 @@ const SCALE = 0.5
 const DEFAULT_SPACING = 100
 const LABEL_WIDTH = 200
 
-type CanvasDialogProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+export type CanvasData = {
   pages: Array<{ path: string; fullUrl: string }>
   breakpoints: Breakpoint[]
   breakpointOrder: string[]
   screenshots: Map<string, Screenshot>
 }
 
+type CanvasDialogProps = CanvasData & {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  siteUrl?: string
+}
+
 function buildNodes(
-  pages: CanvasDialogProps["pages"],
+  pages: CanvasData["pages"],
   breakpoints: Breakpoint[],
   breakpointOrder: string[],
   screenshots: Map<string, Screenshot>,
@@ -80,7 +92,12 @@ function buildNodes(
         id: `frame::${page.path}::${bp.id}`,
         type: "screenshotFrame",
         position: { x, y },
-        data: { screenshot, breakpoint: bp, scale: SCALE, pagePath: page.path },
+        data: {
+          screenshot,
+          breakpoint: bp,
+          scale: SCALE,
+          pagePath: page.path,
+        },
         connectable: false,
         draggable: true,
       })
@@ -145,7 +162,7 @@ function ScreenshotCanvas({
   screenshots,
   spacing,
   onClose,
-}: Omit<CanvasDialogProps, "open" | "onOpenChange"> & {
+}: CanvasData & {
   spacing: number
   onClose: () => void
 }) {
@@ -157,7 +174,9 @@ function ScreenshotCanvas({
 
   // Rebuild nodes when data or spacing changes
   useEffect(() => {
-    setNodes(buildNodes(pages, breakpoints, breakpointOrder, screenshots, spacing))
+    setNodes(
+      buildNodes(pages, breakpoints, breakpointOrder, screenshots, spacing),
+    )
     didInitialFit.current = false
   }, [pages, breakpoints, breakpointOrder, screenshots, spacing])
 
@@ -261,6 +280,108 @@ function ScreenshotCanvas({
   )
 }
 
+// --- Share logic ---
+
+function base64ToBlob(base64: string): Blob {
+  const bytes = atob(base64)
+  const arr = new Uint8Array(bytes.length)
+  for (let i = 0; i < bytes.length; i++) {
+    arr[i] = bytes.charCodeAt(i)
+  }
+  return new Blob([arr], { type: "image/png" })
+}
+
+function ShareButton({
+  pages,
+  breakpoints,
+  breakpointOrder,
+  screenshots,
+  siteUrl,
+}: CanvasData & { siteUrl?: string }) {
+  const generateUploadUrl = useMutation(api.sessions.generateUploadUrl)
+  const createSession = useMutation(api.sessions.createSession)
+  const [sharing, setSharing] = useState(false)
+  const [shared, setShared] = useState(false)
+
+  async function handleShare() {
+    setSharing(true)
+    try {
+      // Upload each done screenshot to Convex storage
+      const uploadedScreenshots: Array<{
+        pageUrl: string
+        breakpointId: string
+        storageId: Id<"_storage">
+      }> = []
+
+      for (const [, screenshot] of screenshots) {
+        if (screenshot.status !== "done" || !screenshot.imageBase64) continue
+
+        const uploadUrl = await generateUploadUrl()
+        const blob = base64ToBlob(screenshot.imageBase64)
+        const result = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": "image/png" },
+          body: blob,
+        })
+        const { storageId } = await result.json()
+
+        uploadedScreenshots.push({
+          pageUrl: screenshot.pageUrl,
+          breakpointId: screenshot.breakpointId,
+          storageId,
+        })
+      }
+
+      // Create session
+      const sessionId = await createSession({
+        url: siteUrl || "",
+        pages,
+        breakpoints,
+        breakpointOrder,
+        screenshots: uploadedScreenshots,
+      })
+
+      // Copy link to clipboard
+      const shareUrl = `${window.location.origin}/canvas/${sessionId}`
+      await navigator.clipboard.writeText(shareUrl)
+      setShared(true)
+      setTimeout(() => setShared(false), 2000)
+    } catch (error) {
+      console.error("Failed to share:", error)
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleShare}
+      disabled={sharing}
+    >
+      {sharing ? (
+        <>
+          <IconLoader2 className="size-3.5 animate-spin" />
+          Sharing...
+        </>
+      ) : shared ? (
+        <>
+          <IconCheck className="size-3.5" />
+          Link copied!
+        </>
+      ) : (
+        <>
+          <IconShare className="size-3.5" />
+          Share
+        </>
+      )}
+    </Button>
+  )
+}
+
+// --- Main Dialog Export ---
+
 export default function CanvasDialog({
   open,
   onOpenChange,
@@ -268,6 +389,7 @@ export default function CanvasDialog({
   breakpoints,
   breakpointOrder,
   screenshots,
+  siteUrl,
 }: CanvasDialogProps) {
   const [spacing, setSpacing] = useState(DEFAULT_SPACING)
 
@@ -322,6 +444,13 @@ export default function CanvasDialog({
               </kbd>
               <span>fit</span>
             </div>
+            <ShareButton
+              pages={pages}
+              breakpoints={breakpoints}
+              breakpointOrder={breakpointOrder}
+              screenshots={screenshots}
+              siteUrl={siteUrl}
+            />
             <Button
               variant="ghost"
               size="icon-sm"
@@ -350,3 +479,6 @@ export default function CanvasDialog({
     </Dialog>
   )
 }
+
+// Also export the canvas for standalone use (shared page)
+export { ScreenshotCanvas, buildNodes, SCALE, DEFAULT_SPACING }
