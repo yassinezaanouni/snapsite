@@ -13,9 +13,6 @@ import {
   type NodeChange,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
-import { useMutation } from "convex/react"
-import { api } from "@/convex/_generated/api"
-import type { Id } from "@/convex/_generated/dataModel"
 import {
   Dialog,
   DialogContent,
@@ -24,20 +21,18 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import {
-  IconX,
-  IconShare,
-  IconCheck,
-  IconLoader2,
-} from "@tabler/icons-react"
+import { IconX } from "@tabler/icons-react"
 import { type Breakpoint, type Screenshot, screenshotKey } from "@/lib/types"
+import type { ComparisonSite, MatchedPage } from "@/lib/types"
 import {
   ScreenshotFrameNode,
   PageLabelNode,
+  ComparisonFrameNode,
 } from "./screenshot-canvas-node"
 
 const nodeTypes = {
   screenshotFrame: ScreenshotFrameNode,
+  comparisonFrame: ComparisonFrameNode,
   pageLabel: PageLabelNode,
 }
 
@@ -52,10 +47,15 @@ export type CanvasData = {
   screenshots: Map<string, Screenshot>
 }
 
+type ComparisonData = {
+  sites: ComparisonSite[]
+  matchedPages: MatchedPage[]
+}
+
 type CanvasDialogProps = CanvasData & {
   open: boolean
   onOpenChange: (open: boolean) => void
-  siteUrl?: string
+  comparisonData?: ComparisonData
 }
 
 function buildNodes(
@@ -149,6 +149,77 @@ function repositionNodes(
   return changed ? result : nodes
 }
 
+// --- Comparison layout ---
+
+function buildComparisonNodes(
+  matchedPages: MatchedPage[],
+  sites: ComparisonSite[],
+  breakpoints: Breakpoint[],
+  breakpointOrder: string[],
+  spacing: number,
+): Node[] {
+  const orderedBreakpoints = breakpointOrder
+    .map((id) => breakpoints.find((b) => b.id === id))
+    .filter(Boolean) as Breakpoint[]
+
+  const nodes: Node[] = []
+  const siteGap = spacing * 0.5
+  const bpGap = spacing
+
+  let y = 0
+
+  for (const matchedPage of matchedPages) {
+    nodes.push({
+      id: `label::${matchedPage.path}`,
+      type: "pageLabel",
+      position: { x: 0, y: y + 20 },
+      data: { label: matchedPage.path, pagePath: matchedPage.path },
+      connectable: false,
+      draggable: false,
+    })
+
+    let x = LABEL_WIDTH
+
+    for (const bp of orderedBreakpoints) {
+      for (const siteMeta of matchedPage.sites) {
+        const site = sites.find((s) => s.id === siteMeta.siteId)
+        if (!site) continue
+
+        const key = screenshotKey(siteMeta.fullUrl, bp.id)
+        const screenshot = siteMeta.present
+          ? site.screenshots.get(key)
+          : undefined
+
+        nodes.push({
+          id: `frame::${matchedPage.path}::${siteMeta.siteId}::${bp.id}`,
+          type: "comparisonFrame",
+          position: { x, y },
+          data: {
+            screenshot: siteMeta.present ? (screenshot ?? null) : null,
+            breakpoint: bp,
+            scale: SCALE,
+            pagePath: matchedPage.path,
+            siteLabel: site.label,
+            siteId: site.id,
+            siteIndex: sites.indexOf(site),
+            isPresent: siteMeta.present,
+          },
+          connectable: false,
+          draggable: true,
+        })
+
+        x += bp.width * SCALE + siteGap
+      }
+
+      x += bpGap - siteGap
+    }
+
+    y += 800
+  }
+
+  return nodes
+}
+
 // --- Undo/Redo helpers ---
 
 function snapshotNodes(nodes: Node[]): Node[] {
@@ -162,23 +233,42 @@ function ScreenshotCanvas({
   screenshots,
   spacing,
   onClose,
+  comparisonData,
 }: CanvasData & {
   spacing: number
   onClose: () => void
+  comparisonData?: ComparisonData
 }) {
-  const [nodes, setNodes] = useState<Node[]>(() =>
-    buildNodes(pages, breakpoints, breakpointOrder, screenshots, spacing),
-  )
+  const isComparison = !!comparisonData
+
+  const initialNodes = isComparison
+    ? buildComparisonNodes(
+        comparisonData.matchedPages,
+        comparisonData.sites,
+        breakpoints,
+        breakpointOrder,
+        spacing,
+      )
+    : buildNodes(pages, breakpoints, breakpointOrder, screenshots, spacing)
+
+  const [nodes, setNodes] = useState<Node[]>(() => initialNodes)
   const { fitView } = useReactFlow()
   const didInitialFit = useRef(false)
 
   // Rebuild nodes when data or spacing changes
   useEffect(() => {
-    setNodes(
-      buildNodes(pages, breakpoints, breakpointOrder, screenshots, spacing),
-    )
+    const newNodes = isComparison
+      ? buildComparisonNodes(
+          comparisonData!.matchedPages,
+          comparisonData!.sites,
+          breakpoints,
+          breakpointOrder,
+          spacing,
+        )
+      : buildNodes(pages, breakpoints, breakpointOrder, screenshots, spacing)
+    setNodes(newNodes)
     didInitialFit.current = false
-  }, [pages, breakpoints, breakpointOrder, screenshots, spacing])
+  }, [pages, breakpoints, breakpointOrder, screenshots, spacing, isComparison, comparisonData])
 
   // --- Undo / Redo ---
   const historyRef = useRef<{ past: Node[][]; future: Node[][] }>({
@@ -222,7 +312,7 @@ function ScreenshotCanvas({
         e.preventDefault()
         redo()
       }
-      if (mod && e.key === "0") {
+      if (mod && e.shiftKey && e.key === "1") {
         e.preventDefault()
         fitView({ padding: 0.1 })
       }
@@ -280,106 +370,6 @@ function ScreenshotCanvas({
   )
 }
 
-// --- Share logic ---
-
-function base64ToBlob(base64: string): Blob {
-  const bytes = atob(base64)
-  const arr = new Uint8Array(bytes.length)
-  for (let i = 0; i < bytes.length; i++) {
-    arr[i] = bytes.charCodeAt(i)
-  }
-  return new Blob([arr], { type: "image/png" })
-}
-
-function ShareButton({
-  pages,
-  breakpoints,
-  breakpointOrder,
-  screenshots,
-  siteUrl,
-}: CanvasData & { siteUrl?: string }) {
-  const generateUploadUrl = useMutation(api.sessions.generateUploadUrl)
-  const createSession = useMutation(api.sessions.createSession)
-  const [sharing, setSharing] = useState(false)
-  const [shared, setShared] = useState(false)
-
-  async function handleShare() {
-    setSharing(true)
-    try {
-      // Upload each done screenshot to Convex storage
-      const uploadedScreenshots: Array<{
-        pageUrl: string
-        breakpointId: string
-        storageId: Id<"_storage">
-      }> = []
-
-      for (const [, screenshot] of screenshots) {
-        if (screenshot.status !== "done" || !screenshot.imageBase64) continue
-
-        const uploadUrl = await generateUploadUrl()
-        const blob = base64ToBlob(screenshot.imageBase64)
-        const result = await fetch(uploadUrl, {
-          method: "POST",
-          headers: { "Content-Type": "image/png" },
-          body: blob,
-        })
-        const { storageId } = await result.json()
-
-        uploadedScreenshots.push({
-          pageUrl: screenshot.pageUrl,
-          breakpointId: screenshot.breakpointId,
-          storageId,
-        })
-      }
-
-      // Create session
-      const sessionId = await createSession({
-        url: siteUrl || "",
-        pages,
-        breakpoints,
-        breakpointOrder,
-        screenshots: uploadedScreenshots,
-      })
-
-      // Copy link to clipboard
-      const shareUrl = `${window.location.origin}/canvas/${sessionId}`
-      await navigator.clipboard.writeText(shareUrl)
-      setShared(true)
-      setTimeout(() => setShared(false), 2000)
-    } catch (error) {
-      console.error("Failed to share:", error)
-    } finally {
-      setSharing(false)
-    }
-  }
-
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={handleShare}
-      disabled={sharing}
-    >
-      {sharing ? (
-        <>
-          <IconLoader2 className="size-3.5 animate-spin" />
-          Sharing...
-        </>
-      ) : shared ? (
-        <>
-          <IconCheck className="size-3.5" />
-          Link copied!
-        </>
-      ) : (
-        <>
-          <IconShare className="size-3.5" />
-          Share
-        </>
-      )}
-    </Button>
-  )
-}
-
 // --- Main Dialog Export ---
 
 export default function CanvasDialog({
@@ -389,8 +379,9 @@ export default function CanvasDialog({
   breakpoints,
   breakpointOrder,
   screenshots,
-  siteUrl,
+  comparisonData,
 }: CanvasDialogProps) {
+  const isComparison = !!comparisonData
   const [spacing, setSpacing] = useState(DEFAULT_SPACING)
 
   return (
@@ -403,11 +394,23 @@ export default function CanvasDialog({
 
         {/* Floating toolbar */}
         <div className="flex items-center gap-3 border-b bg-background/80 px-4 py-2.5 backdrop-blur-sm">
-          <span className="text-sm font-semibold">Canvas View</span>
-          <Badge variant="secondary" className="font-mono text-xs">
-            {pages.length} page{pages.length !== 1 && "s"} &times;{" "}
-            {breakpoints.length} breakpoint{breakpoints.length !== 1 && "s"}
-          </Badge>
+          <span className="text-sm font-semibold">
+            {isComparison ? "Comparison" : "Canvas View"}
+          </span>
+          {isComparison ? (
+            <Badge variant="secondary" className="font-mono text-xs">
+              {comparisonData.sites.length} site
+              {comparisonData.sites.length !== 1 && "s"} &times;{" "}
+              {comparisonData.matchedPages.length} page
+              {comparisonData.matchedPages.length !== 1 && "s"}
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="font-mono text-xs">
+              {pages.length} page{pages.length !== 1 && "s"} &times;{" "}
+              {breakpoints.length} breakpoint
+              {breakpoints.length !== 1 && "s"}
+            </Badge>
+          )}
           <div className="ml-auto flex items-center gap-3">
             {/* Spacing slider */}
             <div className="hidden items-center gap-2 sm:flex">
@@ -440,17 +443,10 @@ export default function CanvasDialog({
               </kbd>
               <span>redo</span>
               <kbd className="ml-1.5 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">
-                ⌘0
+                ⌘⇧1
               </kbd>
               <span>fit</span>
             </div>
-            <ShareButton
-              pages={pages}
-              breakpoints={breakpoints}
-              breakpointOrder={breakpointOrder}
-              screenshots={screenshots}
-              siteUrl={siteUrl}
-            />
             <Button
               variant="ghost"
               size="icon-sm"
@@ -472,6 +468,7 @@ export default function CanvasDialog({
               screenshots={screenshots}
               spacing={spacing}
               onClose={() => onOpenChange(false)}
+              comparisonData={comparisonData}
             />
           </ReactFlowProvider>
         </div>

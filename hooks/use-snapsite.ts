@@ -1,4 +1,7 @@
 import { create } from "zustand"
+import { ConvexHttpClient } from "convex/browser"
+import { api } from "@/convex/_generated/api"
+import { useSessions } from "./use-sessions"
 import {
   type Breakpoint,
   type DiscoveredPage,
@@ -8,6 +11,33 @@ import {
   DEFAULT_BREAKPOINTS,
   screenshotKey,
 } from "@/lib/types"
+import { base64ToBlob } from "@/lib/utils"
+
+// Lazy Convex HTTP client (no WebSocket, just HTTP calls)
+let convexClient: ConvexHttpClient | null = null
+function getConvex(): ConvexHttpClient {
+  if (!convexClient) {
+    convexClient = new ConvexHttpClient(
+      process.env.NEXT_PUBLIC_CONVEX_URL!,
+    )
+  }
+  return convexClient
+}
+
+async function uploadToStorage(imageBase64: string): Promise<string> {
+  const client = getConvex()
+  const uploadUrl: string = await client.mutation(
+    api.sessions.generateUploadUrl,
+  )
+  const blob = base64ToBlob(imageBase64)
+  const result = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { "Content-Type": "image/png" },
+    body: blob,
+  })
+  const { storageId } = await result.json()
+  return storageId
+}
 
 type SnapsiteStore = SnapsiteState & {
   discoverPages: (url: string) => Promise<void>
@@ -49,10 +79,12 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
   captureProgress: { done: 0, total: 0 },
   scrollBeforeCapture: true,
   deduplicatedGroups: new Set<string>(),
+  sessionId: null,
+  isUploading: false,
 
   // Page actions
   discoverPages: async (url) => {
-    set({ url, isDiscovering: true })
+    set({ url, isDiscovering: true, sessionId: null })
 
     try {
       const res = await fetch("/api/discover", {
@@ -146,7 +178,12 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
 
     if (total === 0) return
 
-    set({ isCapturing: true, captureProgress: { done: 0, total } })
+    set({
+      isCapturing: true,
+      isUploading: true,
+      sessionId: null,
+      captureProgress: { done: 0, total },
+    })
 
     // Initialize all screenshots as loading
     const initMap = new Map<string, Screenshot>()
@@ -183,9 +220,10 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
       }
     }
 
-    // Process in batches of 3
+    // Capture in batches of 3, upload each success in the background
     let done = 0
     const batchSize = 3
+    const uploadPromises: Promise<void>[] = []
 
     for (let i = 0; i < tasks.length; i += batchSize) {
       const batch = tasks.slice(i, i + batchSize)
@@ -220,6 +258,7 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
                 return { screenshots: newMap }
               })
             } else {
+              // Store base64 locally for instant display
               set((s) => {
                 const newMap = new Map(s.screenshots)
                 newMap.set(key, {
@@ -230,6 +269,24 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
                 })
                 return { screenshots: newMap }
               })
+
+              // Upload to Convex in the background (non-blocking)
+              uploadPromises.push(
+                uploadToStorage(data.image)
+                  .then((storageId) => {
+                    set((s) => {
+                      const newMap = new Map(s.screenshots)
+                      const existing = newMap.get(key)
+                      if (existing) {
+                        newMap.set(key, { ...existing, storageId })
+                      }
+                      return { screenshots: newMap }
+                    })
+                  })
+                  .catch(() => {
+                    // Upload failed — screenshot still works locally
+                  }),
+              )
             }
           } catch (error) {
             set((s) => {
@@ -252,6 +309,67 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
     }
 
     set({ isCapturing: false })
+
+    // Wait for all background uploads to finish
+    await Promise.all(uploadPromises)
+
+    // Auto-create shareable session
+    try {
+      const client = getConvex()
+      const sessionPages = selectedPages.map((p) => ({
+        path: p.path,
+        fullUrl: p.path === "/" ? url : `${url}${p.path}`,
+      }))
+
+      const screenshotEntries: Array<{
+        pageUrl: string
+        breakpointId: string
+        storageId: string
+      }> = []
+
+      for (const [, s] of get().screenshots) {
+        if (s.status === "done" && s.storageId) {
+          screenshotEntries.push({
+            pageUrl: s.pageUrl,
+            breakpointId: s.breakpointId,
+            storageId: s.storageId,
+          })
+        }
+      }
+
+      const sessionId = await client.mutation(
+        api.sessions.createSession,
+        {
+          url,
+          pages: sessionPages,
+          breakpoints,
+          breakpointOrder: get().breakpointOrder,
+          screenshots: screenshotEntries as Array<{
+            pageUrl: string
+            breakpointId: string
+            storageId: import("@/convex/_generated/dataModel").Id<"_storage">
+          }>,
+        },
+      )
+
+      const sid = sessionId as string
+      set({ sessionId: sid, isUploading: false })
+
+      // Save to session history (localStorage)
+      const hostname = (() => {
+        try { return new URL(url).hostname } catch { return url }
+      })()
+      useSessions.getState().addSession({
+        id: sid,
+        url,
+        hostname,
+        pageCount: sessionPages.length,
+        breakpointCount: breakpoints.length,
+        screenshotCount: screenshotEntries.length,
+      })
+    } catch {
+      set({ isUploading: false })
+    }
   },
 
   retryScreenshot: async (pageUrl, breakpoint, scrollBeforeCapture) => {

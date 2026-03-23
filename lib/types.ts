@@ -18,7 +18,27 @@ export type Screenshot = {
   status: ScreenshotStatus
   imageBase64?: string
   imageUrl?: string
+  storageId?: string
   error?: string
+}
+
+export type ComparisonSite = {
+  id: string
+  url: string
+  label: string
+  pages: DiscoveredPage[]
+  screenshots: Map<string, Screenshot>
+  isCapturing: boolean
+  captureProgress: { done: number; total: number }
+}
+
+export type MatchedPage = {
+  path: string
+  sites: Array<{
+    siteId: string
+    fullUrl: string
+    present: boolean
+  }>
 }
 
 export type SnapsiteState = {
@@ -27,6 +47,8 @@ export type SnapsiteState = {
   pages: DiscoveredPage[]
   breakpoints: Breakpoint[]
   breakpointOrder: string[]
+  sessionId: string | null
+  isUploading: boolean
   screenshots: Map<string, Screenshot>
   isCapturing: boolean
   captureProgress: { done: number; total: number }

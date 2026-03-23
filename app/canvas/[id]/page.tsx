@@ -86,22 +86,38 @@ export default function SharedCanvasPage() {
           &times; {session.breakpoints.length} breakpoint
           {session.breakpoints.length !== 1 && "s"}
         </Badge>
-        <div className="ml-auto flex items-center gap-2">
-          <Label
-            htmlFor="shared-spacing"
-            className="cursor-pointer text-xs text-muted-foreground"
-          >
-            Spacing
-          </Label>
-          <input
-            id="shared-spacing"
-            type="range"
-            min={20}
-            max={300}
-            value={spacing}
-            onChange={(e) => setSpacing(Number(e.target.value))}
-            className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-          />
+        <div className="ml-auto flex items-center gap-3">
+          <div className="hidden items-center gap-2 sm:flex">
+            <Label
+              htmlFor="shared-spacing"
+              className="cursor-pointer text-xs text-muted-foreground"
+            >
+              Spacing
+            </Label>
+            <input
+              id="shared-spacing"
+              type="range"
+              min={20}
+              max={300}
+              value={spacing}
+              onChange={(e) => setSpacing(Number(e.target.value))}
+              className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+            />
+          </div>
+          <div className="hidden items-center gap-1.5 border-l pl-3 text-xs text-muted-foreground lg:flex">
+            <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">
+              ⌘Z
+            </kbd>
+            <span>undo</span>
+            <kbd className="ml-1.5 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">
+              ⌘⇧Z
+            </kbd>
+            <span>redo</span>
+            <kbd className="ml-1.5 rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">
+              ⌘⇧1
+            </kbd>
+            <span>fit</span>
+          </div>
         </div>
       </div>
 

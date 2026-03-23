@@ -25,7 +25,21 @@ import PageList from "./_components/page-list"
 import BreakpointBar from "./_components/breakpoint-bar"
 import ScreenshotGrid from "./_components/screenshot-grid"
 import CanvasDialog from "./_components/screenshot-canvas"
-import { IconCamera, IconLoader2, IconInfoCircle, IconLayout } from "@tabler/icons-react"
+import ComparisonPanel from "./_components/comparison-panel"
+import { useComparison } from "@/hooks/use-comparison"
+import { useSessions } from "@/hooks/use-sessions"
+import {
+  IconCamera,
+  IconLoader2,
+  IconInfoCircle,
+  IconLayout,
+  IconArrowsShuffle,
+  IconCopy,
+  IconCheck,
+  IconExternalLink,
+  IconTrash,
+  IconHistory,
+} from "@tabler/icons-react"
 
 export default function Page() {
   const {
@@ -36,6 +50,8 @@ export default function Page() {
     breakpointOrder,
     screenshots,
     isCapturing,
+    isUploading,
+    sessionId,
     captureProgress,
     scrollBeforeCapture,
     deduplicatedGroups,
@@ -54,8 +70,15 @@ export default function Page() {
     setGroupSelected,
   } = useSnapsite()
 
+  const comparisonSites = useComparison((s) => s.sites)
+  const comparisonMatchedPages = useComparison((s) => s.matchedPages)
+  const importFromCurrent = useComparison((s) => s.importFromCurrent)
+  const { sessions, removeSession } = useSessions()
+
   const [discoveryError, setDiscoveryError] = useState("")
-  const [canvasOpen, setCanvasOpen] = useState(false)
+  const [comparisonMode, setComparisonMode] = useState(false)
+  const [comparisonCanvasOpen, setComparisonCanvasOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const hasPages = pages.length > 0
   const hasBreakpoints = breakpoints.length > 0
@@ -144,6 +167,69 @@ export default function Page() {
             </div>
             {discoveryError && (
               <p className="text-sm text-destructive">{discoveryError}</p>
+            )}
+
+            {/* Recent sessions */}
+            {sessions.length > 0 && (
+              <div className="w-full max-w-2xl space-y-3">
+                <h3 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <IconHistory className="size-4" />
+                  Recent Sessions
+                </h3>
+                <div className="space-y-2">
+                  {sessions.slice(0, 5).map((session) => (
+                    <div
+                      key={session.id}
+                      className="flex items-center gap-3 rounded-lg border bg-card px-4 py-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-mono text-sm font-medium">
+                            {session.hostname}
+                          </span>
+                          <Badge
+                            variant="secondary"
+                            className="shrink-0 font-mono text-[0.625rem]"
+                          >
+                            {session.pageCount} page
+                            {session.pageCount !== 1 && "s"} &times;{" "}
+                            {session.breakpointCount} bp
+                            {session.breakpointCount !== 1 && "s"}
+                          </Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(session.createdAt).toLocaleDateString(
+                            undefined,
+                            {
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )}
+                        </span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          window.open(`/canvas/${session.id}`, "_blank")
+                        }
+                      >
+                        <IconExternalLink className="size-3.5" />
+                        Open
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => removeSession(session.id)}
+                      >
+                        <IconTrash className="size-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </section>
         )}
@@ -294,16 +380,68 @@ export default function Page() {
             {/* Screenshot Grid */}
             {hasScreenshots && (
               <section className="animate-in fade-in space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-lg font-semibold">Screenshots</h2>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCanvasOpen(true)}
-                  >
-                    <IconLayout className="size-4" />
-                    Show in Canvas
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {sessionId && (
+                      <div className="flex items-center gap-1.5 rounded-md border bg-muted/50 px-2 py-1">
+                        <a
+                          href={`/canvas/${sessionId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="max-w-40 truncate font-mono text-xs text-foreground hover:underline"
+                        >
+                          /canvas/{sessionId}
+                        </a>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => {
+                            const shareUrl = `${window.location.origin}/canvas/${sessionId}`
+                            navigator.clipboard.writeText(shareUrl).catch(() => {})
+                            setCopied(true)
+                            setTimeout(() => setCopied(false), 2000)
+                          }}
+                        >
+                          {copied ? (
+                            <IconCheck className="size-3" />
+                          ) : (
+                            <IconCopy className="size-3" />
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                    {isUploading && (
+                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <IconLoader2 className="size-3 animate-spin" />
+                        Uploading...
+                      </span>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (!comparisonMode) {
+                          importFromCurrent(url, gridPages, screenshots)
+                        }
+                        setComparisonMode(!comparisonMode)
+                      }}
+                    >
+                      <IconArrowsShuffle className="size-4" />
+                      {comparisonMode ? "Hide Compare" : "Compare"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!sessionId}
+                      onClick={() =>
+                        window.open(`/canvas/${sessionId}`, "_blank")
+                      }
+                    >
+                      <IconLayout className="size-4" />
+                      Show in Canvas
+                    </Button>
+                  </div>
                 </div>
                 <ScreenshotGrid
                   pages={gridPages}
@@ -317,15 +455,29 @@ export default function Page() {
                   progress={captureProgress}
                   isCapturing={isCapturing}
                 />
-                <CanvasDialog
-                  open={canvasOpen}
-                  onOpenChange={setCanvasOpen}
-                  pages={gridPages}
-                  breakpoints={breakpoints}
-                  breakpointOrder={breakpointOrder}
-                  screenshots={screenshots}
-                  siteUrl={url}
-                />
+                {comparisonMode && (
+                  <ComparisonPanel
+                    breakpoints={breakpoints}
+                    scrollBeforeCapture={scrollBeforeCapture}
+                    onOpenComparisonCanvas={() =>
+                      setComparisonCanvasOpen(true)
+                    }
+                  />
+                )}
+                {comparisonCanvasOpen && (
+                  <CanvasDialog
+                    open
+                    onOpenChange={setComparisonCanvasOpen}
+                    pages={gridPages}
+                    breakpoints={breakpoints}
+                    breakpointOrder={breakpointOrder}
+                    screenshots={screenshots}
+                    comparisonData={{
+                      sites: comparisonSites,
+                      matchedPages: comparisonMatchedPages,
+                    }}
+                  />
+                )}
               </section>
             )}
           </div>
