@@ -54,6 +54,7 @@ export default function Page() {
     sessionId,
     captureProgress,
     scrollBeforeCapture,
+    animatedSite,
     deduplicatedGroups,
     discoverPages,
     togglePage,
@@ -65,6 +66,7 @@ export default function Page() {
     captureAllScreenshots,
     retryScreenshot,
     setScrollBeforeCapture,
+    setAnimatedSite,
     toggleDeduplicateGroup,
     setDeduplicateGroup,
     setGroupSelected,
@@ -320,22 +322,22 @@ export default function Page() {
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-56">
                           <p>
-                            Scroll through each page before capturing to
-                            trigger scroll-based animations and lazy-loaded
-                            content.
+                            Enable for sites with scroll-triggered animations
+                            (Framer Motion, GSAP). Disable for static sites
+                            to capture ~2x faster.
                           </p>
                         </TooltipContent>
                       </Tooltip>
                       <Label
-                        htmlFor="scroll-toggle"
+                        htmlFor="animated-toggle"
                         className="cursor-pointer text-sm"
                       >
-                        Scroll before capture
+                        Animated site
                       </Label>
                       <Switch
-                        id="scroll-toggle"
-                        checked={scrollBeforeCapture}
-                        onCheckedChange={setScrollBeforeCapture}
+                        id="animated-toggle"
+                        checked={animatedSite}
+                        onCheckedChange={setAnimatedSite}
                       />
                     </div>
                     {isCapturing && (

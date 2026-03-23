@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import puppeteer, { type Browser } from "puppeteer"
+import puppeteer, { type Browser, type CDPSession } from "puppeteer"
 
 let browserInstance: Browser | null = null
 
@@ -26,7 +26,13 @@ async function getBrowser(): Promise<Browser> {
 
 export async function POST(req: NextRequest) {
   try {
-    const { url, width, height, scroll = true } = await req.json()
+    const {
+      url,
+      width,
+      height,
+      scroll = true,
+      animated = true,
+    } = await req.json()
 
     if (!url || !width || !height) {
       return NextResponse.json(
@@ -39,18 +45,20 @@ export async function POST(req: NextRequest) {
     const page = await browser.newPage()
 
     try {
-      // Emulate prefers-reduced-motion so frameworks that respect it
-      // (Framer Motion with MotionConfig reducedMotion="user") skip animations
-      await page.emulateMediaFeatures([
-        { name: "prefers-reduced-motion", value: "reduce" },
-      ])
+      let cdp: CDPSession | null = null
 
-      // Use CDP to fast-forward ALL browser-level animations (WAAPI + CSS)
-      // This works at the engine level — Framer Motion's WAAPI animations
-      // complete almost instantly instead of running for 500ms+
-      const cdp = await page.createCDPSession()
-      await cdp.send("Animation.enable")
-      await cdp.send("Animation.setPlaybackRate", { playbackRate: 10000 })
+      if (animated) {
+        await page.emulateMediaFeatures([
+          { name: "prefers-reduced-motion", value: "reduce" },
+        ])
+
+        // Fast-forward all animations at 10000x speed (browser engine level)
+        cdp = await page.createCDPSession()
+        await cdp.send("Animation.enable")
+        await cdp.send("Animation.setPlaybackRate", {
+          playbackRate: 10000,
+        })
+      }
 
       await page.setViewport({ width, height })
       await page.goto(url, {
@@ -58,71 +66,70 @@ export async function POST(req: NextRequest) {
         timeout: 30000,
       })
 
-      // Let hydration + fast-forwarded above-the-fold animations complete
-      await new Promise((r) => setTimeout(r, 800))
+      if (animated) {
+        // Let hydration + fast-forwarded above-the-fold animations complete
+        await new Promise((r) => setTimeout(r, 800))
 
-      if (scroll) {
-        // Scroll through to trigger IntersectionObserver / whileInView / lazy-load
-        // Animations complete almost instantly due to 10000x playback rate
-        await page.evaluate(async () => {
-          const delay = (ms: number) =>
-            new Promise((r) => setTimeout(r, ms))
-          const scrollHeight = document.body.scrollHeight
-          const viewportHeight = window.innerHeight
-          let currentY = 0
+        if (scroll) {
+          // Scroll through to trigger IntersectionObserver / whileInView
+          // Animations complete near-instantly at 10000x playback
+          await page.evaluate(async () => {
+            const delay = (ms: number) =>
+              new Promise((r) => setTimeout(r, ms))
+            const scrollHeight = document.body.scrollHeight
+            const viewportHeight = window.innerHeight
+            let currentY = 0
 
-          while (currentY < scrollHeight) {
-            window.scrollTo({ top: currentY, behavior: "instant" })
-            await delay(150)
-            currentY += Math.floor(viewportHeight / 3)
+            while (currentY < scrollHeight) {
+              window.scrollTo({ top: currentY, behavior: "instant" })
+              await delay(150)
+              currentY += Math.floor(viewportHeight / 3)
+            }
+
+            window.scrollTo({ top: scrollHeight, behavior: "instant" })
+            await delay(300)
+          })
+        }
+
+        // Finish all current WAAPI animations to their end state
+        await page.evaluate(() => {
+          for (const a of document.getAnimations()) {
+            try {
+              a.finish()
+            } catch {}
           }
-
-          window.scrollTo({ top: scrollHeight, behavior: "instant" })
-          await delay(300)
         })
+
+        // Inject CSS to block all CSS-level animations/transitions
+        await page.addStyleTag({
+          content: `
+            *, *::before, *::after {
+              animation-delay: -0.0001s !important;
+              animation-duration: 0s !important;
+              animation-play-state: paused !important;
+              transition-delay: 0s !important;
+              transition-duration: 0s !important;
+            }
+          `,
+        })
+
+        // FREEZE all future animations at creation (playbackRate: 0).
+        // When we scroll back to top, exit animations are created but
+        // paused at time 0 — which is the VISIBLE end-state of the
+        // enter animation. Elements stay visible.
+        await cdp!.send("Animation.setPlaybackRate", { playbackRate: 0 })
+
+        // Scroll back to top — exit animations freeze at visible state
+        await page.evaluate(() => window.scrollTo(0, 0))
+        await new Promise((r) => setTimeout(r, 300))
       }
 
-      // Expand viewport to full page height so ALL elements are "in view"
-      const fullHeight = await page.evaluate(
-        () => document.documentElement.scrollHeight,
-      )
-      await page.setViewport({
-        width,
-        height: Math.max(height, fullHeight),
-      })
-      await page.evaluate(() => window.scrollTo(0, 0))
-
-      // Wait for viewport-expansion-triggered animations to fast-forward
-      await new Promise((r) => setTimeout(r, 1000))
-
-      // Inject CSS to force any remaining CSS animations to end state
-      // The negative delay trick makes animations jump to their final keyframe
-      await page.addStyleTag({
-        content: `
-          *, *::before, *::after {
-            animation-delay: -0.0001s !important;
-            animation-duration: 0s !important;
-            animation-play-state: paused !important;
-            transition-delay: 0s !important;
-            transition-duration: 0s !important;
-          }
-        `,
-      })
-
-      // Finish any WAAPI animations that are still lingering
-      await page.evaluate(() => {
-        for (const a of document.getAnimations()) {
-          try {
-            a.finish()
-          } catch {}
-        }
-      })
-
-      await new Promise((r) => setTimeout(r, 300))
-
-      // Wait for network to settle (lazy images)
+      // Wait for network to settle (images, fonts)
       await page
-        .waitForNetworkIdle({ idleTime: 500, timeout: 10000 })
+        .waitForNetworkIdle({
+          idleTime: 500,
+          timeout: animated ? 10000 : 5000,
+        })
         .catch(() => {})
 
       // Wait for all images
@@ -142,6 +149,21 @@ export async function POST(req: NextRequest) {
       })
 
       await new Promise((r) => setTimeout(r, 200))
+
+      // Lock all elements using viewport-relative heights (100vh, h-screen)
+      // to their current pixel values. fullPage: true internally expands
+      // the viewport which would make 100vh elements stretch to the full
+      // document height. This locks them at the original viewport size.
+      await page.evaluate((vh: number) => {
+        const els = document.querySelectorAll<HTMLElement>("*")
+        for (const el of els) {
+          const rect = el.getBoundingClientRect()
+          if (Math.abs(rect.height - vh) < 2) {
+            el.style.setProperty("height", `${vh}px`, "important")
+            el.style.setProperty("max-height", `${vh}px`, "important")
+          }
+        }
+      }, height)
 
       const screenshot = await page.screenshot({
         type: "png",

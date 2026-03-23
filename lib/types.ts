@@ -53,6 +53,7 @@ export type SnapsiteState = {
   isCapturing: boolean
   captureProgress: { done: number; total: number }
   scrollBeforeCapture: boolean
+  animatedSite: boolean
   deduplicatedGroups: Set<string>
 }
 

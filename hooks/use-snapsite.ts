@@ -61,6 +61,7 @@ type SnapsiteStore = SnapsiteState & {
     scrollBeforeCapture: boolean,
   ) => Promise<void>
   setScrollBeforeCapture: (value: boolean) => void
+  setAnimatedSite: (value: boolean) => void
   toggleDeduplicateGroup: (parent: string) => void
   setDeduplicateGroup: (parent: string, value: boolean) => void
 }
@@ -78,6 +79,7 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
   isCapturing: false,
   captureProgress: { done: 0, total: 0 },
   scrollBeforeCapture: true,
+  animatedSite: true,
   deduplicatedGroups: new Set<string>(),
   sessionId: null,
   isUploading: false,
@@ -241,6 +243,7 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
                 width: task.width,
                 height: task.height,
                 scroll: scrollBeforeCapture,
+                animated: get().animatedSite,
               }),
             })
 
@@ -394,6 +397,7 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
           width: breakpoint.width,
           height: breakpoint.height,
           scroll: scrollBeforeCapture,
+          animated: get().animatedSite,
         }),
       })
 
@@ -438,6 +442,7 @@ export const useSnapsite = create<SnapsiteStore>((set, get) => ({
 
   // Settings
   setScrollBeforeCapture: (value) => set({ scrollBeforeCapture: value }),
+  setAnimatedSite: (value) => set({ animatedSite: value }),
 
   toggleDeduplicateGroup: (parent) =>
     set((s) => {
