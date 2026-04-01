@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import puppeteer, { type Browser, type CDPSession } from "puppeteer"
+import type { Browser, CDPSession } from "puppeteer-core"
+
+const IS_VERCEL = !!process.env.VERCEL
 
 let browserInstance: Browser | null = null
 
@@ -8,14 +10,25 @@ async function getBrowser(): Promise<Browser> {
     return browserInstance
   }
 
-  browserInstance = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-    ],
-  })
+  if (IS_VERCEL) {
+    const chromium = (await import("@sparticuz/chromium")).default
+    const puppeteer = (await import("puppeteer-core")).default
+    browserInstance = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    })
+  } else {
+    const puppeteer = (await import("puppeteer")).default
+    browserInstance = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+      ],
+    }) as unknown as Browser
+  }
 
   browserInstance.on("disconnected", () => {
     browserInstance = null
@@ -23,6 +36,8 @@ async function getBrowser(): Promise<Browser> {
 
   return browserInstance
 }
+
+export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
   try {
