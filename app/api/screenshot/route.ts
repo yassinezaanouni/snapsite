@@ -11,11 +11,13 @@ async function getBrowser(): Promise<Browser> {
   }
 
   if (IS_VERCEL) {
-    const chromium = (await import("@sparticuz/chromium")).default
+    const chromium = (await import("@sparticuz/chromium-min")).default
     const puppeteer = (await import("puppeteer-core")).default
     browserInstance = await puppeteer.launch({
       args: chromium.args,
-      executablePath: await chromium.executablePath(),
+      executablePath: await chromium.executablePath(
+        "https://github.com/nicholasgasior/headless-chromium-builds/releases/download/v131.0.6778.264/chromium-v131.0.6778.264-layer.zip",
+      ),
       headless: true,
     })
   } else {
