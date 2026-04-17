@@ -16,7 +16,7 @@ async function getBrowser(): Promise<Browser> {
     browserInstance = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath(
-        "https://github.com/nicholasgasior/headless-chromium-builds/releases/download/v131.0.6778.264/chromium-v131.0.6778.264-layer.zip",
+        "https://github.com/Sparticuz/chromium/releases/download/v147.0.0/chromium-v147.0.0-pack.x64.tar",
       ),
       headless: true,
     })
